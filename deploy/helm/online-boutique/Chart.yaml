@@ -1,0 +1,6 @@
+apiVersion: v2
+name: online-boutique
+description: Online Boutique (Google microservices-demo) pinned release for AWS EKS + ALB Ingress
+type: application
+version: 0.2.0
+appVersion: "0.10.4"

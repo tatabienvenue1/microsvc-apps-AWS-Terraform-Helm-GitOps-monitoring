@@ -1,0 +1,28 @@
+Online Boutique — post-deploy verification
+==========================================
+
+1) Images are pinned in values.yaml:
+   - Upstream services: image.registry + image.digests.<service> (v0.10.4 digests; tag fallback if a digest is omitted).
+   - redis / busybox: full references with digest (.Values.redis.image, .Values.busybox.image).
+
+2) No frontend-external LoadBalancer Service:
+   kubectl get svc -n {{ .Release.Namespace }} -l app=frontend
+   (Expect only ClusterIP "frontend", not "frontend-external".)
+
+3) Ingress → frontend:80 (ClusterIP):
+   kubectl describe ingress -n {{ .Release.Namespace }} frontend
+
+4) TLS on ALB:
+   ACM ARN is set via annotation alb.ingress.kubernetes.io/certificate-arn
+   (set ingress.alb.certificateArn in values).
+
+5) HTTPS + DNS (you still do outside the chart):
+   - Point your FQDN (same as ingress.host) at the ALB DNS name from the Ingress status.
+   - Then: https://{{ .Values.ingress.host }}/ should load the storefront.
+
+6) Frontend platform hint:
+   Deployment "frontend" includes ENV_PLATFORM=aws.
+
+7) Network policies (when networkPolicy.enabled):
+   kubectl get networkpolicy -n {{ .Release.Namespace }}
+   Tighten or set networkPolicy.allowInternetEgress false only if you add narrower egress rules.

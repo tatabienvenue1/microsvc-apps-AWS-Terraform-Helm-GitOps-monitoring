@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: online-boutique
+  namespace: argocd
+spec:
+  project: microservices-platform
+  source:
+    # Example file: copy values from your environment.
+    # For Kustomize-based environments, see overlays/dev, overlays/stage, overlays/prod.
+    repoURL: https://gitlab.com/your-group/your-repo.git
+    targetRevision: main
+    path: deploy/helm/online-boutique
+    helm:
+      parameters:
+        - name: ingress.host
+          value: shop.example.com
+        - name: ingress.alb.certificateArn
+          value: arn:aws:acm:eu-central-1:123456789012:certificate/replace-me
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: online-boutique
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

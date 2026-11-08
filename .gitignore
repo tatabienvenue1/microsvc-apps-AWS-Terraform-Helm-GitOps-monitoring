@@ -1,0 +1,25 @@
+# Terraform
+terraform.tfstate
+terraform.tfstate.*
+*.tfstate
+*.tfstate.*
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/*.tfvars
+!infra/terraform/terraform.tfvars.example
+infra/terraform/backend.hcl
+!infra/terraform/backend.hcl.example
+infra/terraform/crash.log
+infra/terraform/override.tf
+infra/terraform/override.tf.json
+*_override.tf
+*_override.tf.json
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Pre-commit
+.pre-commit-cache/

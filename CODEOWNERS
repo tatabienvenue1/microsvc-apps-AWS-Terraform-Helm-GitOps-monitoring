@@ -1,0 +1,7 @@
+# Code owners — pair with GitLab protected branch rules on `main`.
+# Replace @YOUR_GITLAB_USER with your GitLab username or group.
+
+/deploy/argocd/overlays/prod/ @YOUR_GITLAB_USER
+/infra/terraform/ @YOUR_GITLAB_USER
+/.gitlab-ci.yml @YOUR_GITLAB_USER
+/docs/incident-response/ @YOUR_GITLAB_USER

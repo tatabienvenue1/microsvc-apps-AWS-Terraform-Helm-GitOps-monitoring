@@ -1,0 +1,15 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: online-boutique
+  namespace: argocd
+spec:
+  source:
+    repoURL: https://gitlab.com/your-group/your-repo.git
+    targetRevision: main
+    helm:
+      parameters:
+        - name: ingress.host
+          value: boutique.example.com
+        - name: ingress.alb.certificateArn
+          value: arn:aws:acm:eu-central-1:123456789012:certificate/replace-me

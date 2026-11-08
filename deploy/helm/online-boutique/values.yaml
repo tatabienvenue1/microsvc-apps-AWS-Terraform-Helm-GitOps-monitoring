@@ -1,0 +1,80 @@
+# Online Boutique — Google microservices-demo, fixed release v0.10.4
+# https://github.com/GoogleCloudPlatform/microservices-demo
+#
+# Supply-chain and network controls (application code lives upstream):
+# - Microservice images: registry + digest (preferred) or tag via image.digests / image.tag.
+# - redis / busybox: pinned by digest (see redis.image, busybox.image).
+# - No Service type LoadBalancer for frontend-external (not in chart templates).
+# - External traffic: Ingress (ALB) → Service frontend:80 → pods :8080.
+# - Frontend Deployment sets ENV_PLATFORM=aws (see templates/workloads.yaml).
+
+image:
+  registry: us-central1-docker.pkg.dev/google-samples/microservices-demo
+  tag: v0.10.4
+  # Per-service digests for google-samples/microservices-demo (v0.10.4). Resolved 2026-05.
+  # If a key is removed, Helm falls back to registry/<service>:tag for that component.
+  digests:
+    adservice: sha256:5a6092151983bf98a05279ff5a64ae82e18f872a3a14b5eddd35da16434e20b8
+    cartservice: sha256:a48c617b36f12d755486b58feb4e04beeadf20216a017c4dbe5002c3bcd345b8
+    checkoutservice: sha256:51774b1e98dc0454ffcf3782f8a092ac5c440cbeaea25e1e0e416c92c7ba7b5b
+    currencyservice: sha256:475209eabe92828ec843d24dce59738cfe48def54eadcca807b26c0fd39158db
+    emailservice: sha256:17cffb78f3d8383b0ee1ad8875fc0ef87b920a912302995ad127a5585f2160e2
+    frontend: sha256:4ed23083391deed59d3dab4a3c72d6c49120f6100f45593b87a537dc094397cd
+    loadgenerator: sha256:fe1d8c6249789fbfe016d144a9cbbb5bffa1ede02769f6b24bd31e9beaadf68c
+    paymentservice: sha256:38912ba85fabc875a57cf981a691cfd3dca96c500ffd03b276bbf65ab6e98d08
+    productcatalogservice: sha256:efa78eeacc26d7de07388c9c3eb90aeb0dfa8324fce33deb157393d5c1f39119
+    recommendationservice: sha256:3f6cf3f0625b56d05e49741202167d0fcaf6c065ef386f66307e3e1a9dc895b8
+    shippingservice: sha256:ec32ef03a874640dbdceb7850327a3f38a7f20b06479be27786ff3fe25569ce2
+
+redis:
+  # docker.io/library/redis:7.2.5-alpine3.20 (digest-pinned)
+  image: docker.io/library/redis@sha256:6aaf3f5e6bc8a592fbfe2cccf19eb36d27c39d12dab4f4b01556b7449e7b1f44
+
+busybox:
+  # docker.io/library/busybox:1.36.1 (digest-pinned)
+  image: docker.io/library/busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+
+loadgenerator:
+  enabled: true
+
+networkPolicy:
+  # Baseline egress policies: same-namespace, kube-system DNS, optional HTTPS/HTTP to internet.
+  enabled: true
+  defaultDenyEgress: true
+  allowSameNamespaceEgress: true
+  allowDnsEgress: true
+  # Some services call public HTTP(S) APIs (e.g. currency data). Disable only if you
+  # replace this with tighter ipBlock/CIDR rules.
+  allowInternetEgress: true
+
+ingress:
+  enabled: true
+  className: alb
+  # FQDN for this Ingress rule; must be covered by the ACM certificate below.
+  host: shop.example.com
+
+  alb:
+    # TLS: bind ACM certificate to the ALB listener (same region as the cluster / ALB).
+    # Example: arn:aws:acm:eu-central-1:123456789012:certificate/abcd-1234-...
+    certificateArn: ""
+
+    scheme: internet-facing
+    targetType: ip
+
+    # Optional: comma-separated public subnet IDs (e.g. from terraform output public_subnet_ids).
+    # Leave empty to let the controller choose subnets (requires proper subnet tags on the VPC).
+    subnets: ""
+
+    healthcheck:
+      path: /_healthz
+      protocol: HTTP
+      intervalSeconds: "15"
+      timeoutSeconds: "6"
+      healthyThresholdCount: "2"
+      unhealthyThresholdCount: "2"
+      successCodes: "200"
+
+    listenPorts: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    sslRedirect: "443"
+
+    extraAnnotations: {}

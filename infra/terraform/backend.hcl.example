@@ -1,0 +1,9 @@
+# Copy this file to backend.hcl and fill values.
+# Terraform will read these values during `terraform init -backend-config=backend.hcl`.
+
+bucket         = "unique-bucket-name"
+key            = "production-grade-microservices-platform/terraform.tfstate"
+region         = "eu-central-1"
+encrypt        = true
+# Optional for Terraform 1.9.x compatibility:
+# dynamodb_table = "terraform-state-locks"

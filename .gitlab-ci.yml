@@ -1,0 +1,194 @@
+stages:
+  - validate
+  - plan
+  - deploy
+
+# Terraform plan/apply and IaC scans (tfsec, checkov, trivy) run only when these paths change:
+#   infra/terraform/**/*  .gitlab-ci.yml
+# fmt_validate + helm:lint still run every pipeline for quick feedback.
+
+variables:
+  TF_ROOT: infra/terraform
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  # Used by the AWS provider when set (match infra/terraform var.aws_region).
+  AWS_DEFAULT_REGION: eu-central-1
+  # Preferred auth: GitLab OIDC role assumption in AWS.
+  # Example: arn:aws:iam::123456789012:role/gitlab-terraform-role
+  AWS_ROLE_ARN: ""
+
+# Jobs that call the AWS API (plan/apply) need credentials on the runner.
+.terraform_aws:
+  image:
+    name: hashicorp/terraform:1.9.8
+    entrypoint: [""]
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://gitlab.com
+  before_script:
+    - export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-eu-central-1}"
+    - |
+      if [ -n "${AWS_ROLE_ARN:-}" ]; then
+        echo "Using GitLab OIDC to assume AWS role."
+        export AWS_WEB_IDENTITY_TOKEN_FILE="${CI_PROJECT_DIR}/.gitlab-oidc-token"
+        printf '%s' "$GITLAB_OIDC_TOKEN" > "$AWS_WEB_IDENTITY_TOKEN_FILE"
+      elif [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+        echo "Using static AWS credentials from CI variables."
+      else
+        echo "ERROR: No AWS credentials in CI — Terraform cannot reach AWS."
+        echo "Preferred: set AWS_ROLE_ARN and configure GitLab OIDC trust in AWS IAM."
+        echo "Fallback: set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY."
+        exit 1
+      fi
+    - |
+      if [ -z "${TF_STATE_BUCKET:-}" ]; then
+        echo "ERROR: TF_STATE_BUCKET is required for CI plan/apply with S3 backend."
+        echo "Set GitLab CI variable TF_STATE_BUCKET (and optionally TF_STATE_KEY)."
+        exit 1
+      fi
+      TF_STATE_KEY="${TF_STATE_KEY:-${CI_PROJECT_PATH_SLUG:-terraform}/terraform.tfstate}"
+      if [ -n "${TF_STATE_LOCK_TABLE:-}" ]; then
+        terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+          -backend-config="bucket=${TF_STATE_BUCKET}" \
+          -backend-config="key=${TF_STATE_KEY}" \
+          -backend-config="region=${AWS_DEFAULT_REGION}" \
+          -backend-config="encrypt=true" \
+          -backend-config="dynamodb_table=${TF_STATE_LOCK_TABLE}"
+      else
+        terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+          -backend-config="bucket=${TF_STATE_BUCKET}" \
+          -backend-config="key=${TF_STATE_KEY}" \
+          -backend-config="region=${AWS_DEFAULT_REGION}" \
+          -backend-config="encrypt=true"
+      fi
+
+default:
+  image:
+    name: hashicorp/terraform:1.9.8
+    entrypoint: [""]
+  before_script:
+    - terraform -chdir="$TF_ROOT" init -input=false -backend=false
+
+terraform:fmt_validate:
+  stage: validate
+  script:
+    - terraform -chdir="$TF_ROOT" fmt -check -recursive
+    - terraform -chdir="$TF_ROOT" validate
+
+helm:lint:
+  stage: validate
+  image: alpine:3.20
+  before_script: []
+  script:
+    - apk add --no-cache helm
+    - helm lint ./deploy/helm/online-boutique
+    - helm template online-boutique ./deploy/helm/online-boutique --set ingress.host=boutique.example.com --set ingress.alb.certificateArn=arn:aws:acm:eu-central-1:111111111111:certificate/00000000-0000-0000-0000-000000000000 >/dev/null
+
+tfsec:scan:
+  stage: validate
+  image:
+    name: aquasec/tfsec:latest
+    entrypoint: [""]
+  before_script: []
+  script:
+    - tfsec --no-color --exclude-downloaded-modules infra/terraform
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - infra/terraform/**/*
+        - .gitlab-ci.yml
+      when: on_success
+      allow_failure: false
+    - changes:
+        - infra/terraform/**/*
+        - .gitlab-ci.yml
+      when: on_success
+      allow_failure: true
+    - when: never
+
+checkov:scan:
+  stage: validate
+  image:
+    name: bridgecrew/checkov:latest
+    entrypoint: [""]
+  before_script: []
+  script:
+    - checkov -d infra/terraform --quiet --skip-check CKV_TF_1
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - infra/terraform/**/*
+        - .gitlab-ci.yml
+      when: on_success
+      allow_failure: false
+    - changes:
+        - infra/terraform/**/*
+        - .gitlab-ci.yml
+      when: on_success
+      allow_failure: true
+    - when: never
+
+trivy:config_scan:
+  stage: validate
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  before_script: []
+  script:
+    - trivy config --quiet --severity HIGH,CRITICAL --exit-code 1 --tf-exclude-downloaded-modules --skip-dirs .external_modules --skip-dirs terraform-aws-modules .
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - infra/terraform/**/*
+        - .gitlab-ci.yml
+      when: on_success
+      allow_failure: false
+    - changes:
+        - infra/terraform/**/*
+        - .gitlab-ci.yml
+      when: on_success
+      allow_failure: true
+    - when: never
+
+terraform:plan:
+  extends: .terraform_aws
+  stage: plan
+  script:
+    - terraform -chdir="$TF_ROOT" plan -out=tfplan
+  artifacts:
+    paths:
+      - $TF_ROOT/tfplan
+    expire_in: 1 day
+  rules:
+    - changes:
+        - infra/terraform/**/*
+        - .gitlab-ci.yml
+      when: on_success
+    - when: never
+
+terraform:apply:
+  extends: .terraform_aws
+  stage: deploy
+  when: manual
+  allow_failure: false
+  script:
+    - terraform -chdir="$TF_ROOT" apply -auto-approve tfplan
+  dependencies:
+    - terraform:plan
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_COMMIT_REF_PROTECTED == "true"'
+      changes:
+        - infra/terraform/**/*
+        - .gitlab-ci.yml
+      when: manual
+    - when: never
+
+argocd:sync_hint:
+  stage: deploy
+  image: alpine:3.20
+  before_script: []
+  script:
+    - echo "Argo CD sync is configured by deploy/argocd/*.yaml."
+    - echo "Apply manifests once, then Argo CD auto-sync handles chart deployments."
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
